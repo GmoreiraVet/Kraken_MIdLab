@@ -1,43 +1,75 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import gzip
-from typing import TextIO
+from pathlib import Path
 
 # ===== EDIT THESE PATHS =====
-FASTQ_PATH = "/home/viroicbas2023/Documents/Gmoreira/Serginho/RatHevFalahado/4GN65X_fastq/4GN65X_1_S76_Liver.fastq"
-FASTA_PATH = "/home/viroicbas2023/Documents/Gmoreira/Serginho/RatHevFalahado/Fasta.fasta"
-# ===========================
+INPUT_FOLDER = "/home/viroicbas2023/Downloads/YZ8NQ3_fastq"
+OUTPUT_FOLDER = "/home/viroicbas2023/Downloads/YZ8NQ3_fastq/OutputFastaReruns"
+TRIM_SIZE = 10
+# ============================
 
-def open_maybe_gzip(path: str, mode: str = "rt") -> TextIO:
-    if path.endswith(".gz"):
-        return gzip.open(path, mode)
-    return open(path, mode, encoding="utf-8")
 
-def fastq_to_fasta(fastq_path: str, fasta_path: str) -> None:
-    with open_maybe_gzip(fastq_path, "rt") as fin, open(fasta_path, "w", encoding="utf-8") as fout:
-        line_num = 0
+def trim_sequence(seq: str, trim: int) -> str:
+    """Trim bases from both ends of a sequence."""
+    if len(seq) <= trim * 2:
+        return ""
+    return seq[trim:-trim]
 
-        for line in fin:
-            line_num += 1
-            line = line.rstrip("\n")
-            mod = line_num % 4
 
-            if mod == 1:  # Header
-                if not line.startswith("@"):
-                    raise ValueError(f"Invalid FASTQ format at line {line_num}")
-                header = line[1:].split()[0]
-                fout.write(f">{header}\n")
+def fastq_to_trimmed_fasta(input_file: Path, output_file: Path, trim: int):
+    """Convert FASTQ to FASTA while trimming sequences."""
 
-            elif mod == 2:  # Sequence
-                fout.write(line + "\n")
+    with open(input_file, "r") as fin, open(output_file, "w") as fout:
 
-        if line_num % 4 != 0:
-            raise ValueError("FASTQ file is truncated or malformed")
+        while True:
+            header = fin.readline()
+            if not header:
+                break
 
-    print("Conversion complete.")
-    print(f"Input : {fastq_path}")
-    print(f"Output: {fasta_path}")
+            seq = fin.readline().strip()
+            fin.readline()  # +
+            fin.readline()  # quality
+
+            header = header.strip()
+
+            if not header.startswith("@"):
+                raise ValueError(f"Invalid FASTQ header in {input_file}")
+
+            trimmed = trim_sequence(seq, trim)
+
+            if trimmed:
+                read_id = header[1:].split()[0]
+                fout.write(f">{read_id}\n{trimmed}\n")
+
+
+def main():
+
+    input_path = Path(INPUT_FOLDER)
+    output_path = Path(OUTPUT_FOLDER)
+
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    fastq_files = (
+        list(input_path.glob("*.fastq")) +
+        list(input_path.glob("*.fq"))
+    )
+
+    if not fastq_files:
+        print("No FASTQ files found.")
+        return
+
+    for fastq in fastq_files:
+
+        output_file = output_path / (fastq.stem + ".fasta")
+
+        print(f"Processing: {fastq.name}")
+
+        fastq_to_trimmed_fasta(fastq, output_file, TRIM_SIZE)
+
+    print(f"\nFinished processing {len(fastq_files)} files.")
+    print(f"Output folder: {output_path}")
+
 
 if __name__ == "__main__":
-    fastq_to_fasta(FASTQ_PATH, FASTA_PATH)
+    main()
