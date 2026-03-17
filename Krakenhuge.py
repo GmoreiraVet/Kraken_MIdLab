@@ -8,6 +8,8 @@ kraken_db = "/home/viroicbas2023/Documents/Gmoreira/krakenDB/PlusPfP_Grandalhona
 
 # Toggle exporting of unclassified reads. Potentially useful for uncharacterized sequences; Mostly useful for trash reads. True or Flase. @GmoreiraVet
 EXPORT_UNCLASSIFIED = True
+# Toggle memory mapping (needed when dtabase is too big for available RAM). True or False. @GmoreiraVet
+USE_MEMORY_MAPPING = True
 
 # Create output folder if it doesn't exist
 os.makedirs(output_folder, exist_ok=True)
@@ -40,7 +42,6 @@ for file_name in os.listdir(input_folder):
             "--output", output_path,
             "--report", report_path,
             "--minimum-base-quality", min_base_quality,
-            memory_mapping,
             "--confidence", confidence,
         ]
 
@@ -48,6 +49,8 @@ for file_name in os.listdir(input_folder):
         if EXPORT_UNCLASSIFIED:
             unclassified_out = os.path.join(output_folder, f"{sample_name}_unclassified.fastq")
             cmd.extend(["--unclassified-out", unclassified_out])
+        if USE_MEMORY_MAPPING:
+            cmd.append("--memory-mapping")
 
         # Input file. The input FASTQ file is appended to the command list, which is the last argument for Kraken2. This ensures that Kraken2 processes the correct file for each iteration of the loop, allowing for efficient batch processing of multiple samples in the specified input folder.
         cmd.append(input_path)
