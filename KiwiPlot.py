@@ -118,8 +118,7 @@ def print_ascii_kitty():
     kitty = r"""
      ∧ ,,, ∧
     ( ̳• · • ̳)
-    /   づ♡ ATGCGCTGACGCAGACATAGACGACACCACACCACGGATTTAGACAGTACAGATAGGAC      
-
+    /   づ♡ atggctcgtattgctgaattaattaatgatatttcttctattatggcttaa      
 
     """
     print("Kiwi has assembled your genome for you! Hard work...")
