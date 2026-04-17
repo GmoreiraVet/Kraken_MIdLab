@@ -1,43 +1,81 @@
-from Bio import SeqIO
+#!/usr/bin/env python3
+
 import os
 import re
+from Bio import SeqIO
 
 # =========================
-# Variables - Update before Running
+# CONFIGURATION SECTION
 # =========================
-INPUT_FASTA = "/home/viroicbas2023/Documents/Gmoreira/Vibrios/Ecoli/NEW/Virsorter2/final-viral-combined.fa"
-OUTPUT_DIR = "/home/viroicbas2023/Documents/Gmoreira/Vibrios/Ecoli/NEW/Virsorter2/FinalViral-separated"
-USE_FULL_HEADER = True  # True = use full header, False = only first word
 
- # Function to sanitize filenames. Replaces any nonalphanumeric character with underscores. Avoids compatibility issues.
+CONFIG = {
+    # Input multi-FASTA
+    "input_fasta": "/home/viroicbas2023/Documents/Gmoreira/EnteroVirusCarraçasUropigeaCustom/Enterovirus/ABRIL_2026/Seqs/Database/Varios.fasta",
+
+    # Output directory
+    "output_dir": "/home/viroicbas2023/Documents/Gmoreira/EnteroVirusCarraçasUropigeaCustom/Enterovirus/ABRIL_2026/Seqs/Database/Varios_Individualizados",
+    # Overwrite existing files
+    "overwrite": True,
+
+    # Remove problematic filename characters
+    "sanitize_filenames": True,
+
+    # Max filename length (avoid OS issues)
+    "max_name_length": 100,
+}
+
+# =========================
+# HELPERS
+# =========================
+
 def sanitize_filename(name):
-    """Make safe filenames from FASTA headers"""
-    return re.sub(r'[^A-Za-z0-9_.-]', '_', name)
+    """Convert header to safe filename."""
+    # Replace spaces with underscores
+    name = name.replace(" ", "_")
 
-# Splits Multifasta into individual fasta files. Each file is named after the header of the sequence, sanitized to ensure it is a valid filename. If USE_FULL_HEADER is set to True, the entire header is used for naming; otherwise, only the first word of the header is used. The function iterates through each record in the input FASTA file, creates an output file for each sequence, and writes the sequence to its respective file in the specified output directory.
-def split_fasta(input_fasta, output_dir):
+    # Remove problematic characters
+    name = re.sub(r"[^\w\-\.]", "", name)
+
+    # Trim length
+    name = name[:CONFIG["max_name_length"]]
+
+    return name
+
+
+# =========================
+# MAIN LOGIC
+# =========================
+
+def main():
+    input_fasta = CONFIG["input_fasta"]
+    output_dir = CONFIG["output_dir"]
+
     os.makedirs(output_dir, exist_ok=True)
 
-    for i, record in enumerate(SeqIO.parse(input_fasta, "fasta"), start=1):
-        
-        if USE_FULL_HEADER:
-            name = record.description
+    count = 0
+
+    for record in SeqIO.parse(input_fasta, "fasta"):
+
+        header = record.description  # full header line
+
+        if CONFIG["sanitize_filenames"]:
+            filename = sanitize_filename(header)
         else:
-            name = record.id
+            filename = header.replace(" ", "_")
 
-        name = sanitize_filename(name)
+        output_path = os.path.join(output_dir, f"{filename}.fasta")
 
-        # fallback if header is weird/empty
-        if not name:
-            name = f"contig_{i}"
+        if os.path.exists(output_path) and not CONFIG["overwrite"]:
+            print(f"Skipping existing file: {output_path}")
+            continue
 
-        output_file = os.path.join(output_dir, f"{name}.fasta")
+        SeqIO.write(record, output_path, "fasta")
+        count += 1
 
-        with open(output_file, "w") as out_f:
-            SeqIO.write(record, out_f, "fasta")
+    print(f"\nDone.")
+    print(f"Sequences written: {count}")
+    print(f"Output directory: {output_dir}")
 
-    print(f"✅ Done. Files saved in: {output_dir}")
 
-
-# Run
-split_fasta(INPUT_FASTA, OUTPUT_DIR)
+if __name__ == "__main__":
+    main()
