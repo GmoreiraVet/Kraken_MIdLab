@@ -10,10 +10,10 @@ import gzip
 
 CONFIG = {
     # Input directory (recursive)
-    "input_dir": "/home/viroicbas2023/Documents/Gmoreira/EnteroVirusCarraçasUropigeaCustom/Enterovirus/ABRIL_2026/Seqs",
+    "input_dir": "/home/viroicbas2023/Documents/Gmoreira/EnteroVirusCarraçasUropigeaCustom/Enterovirus/ABRIL_2026/ARTIGO_NATURE_SP/BuiltDB",
 
     # Output file
-    "output_file": "/home/viroicbas2023/Documents/Gmoreira/EnteroVirusCarraçasUropigeaCustom/Enterovirus/ABRIL_2026/Seqs/concatenated_sequences.fasta",
+    "output_file": "/home/viroicbas2023/Documents/Gmoreira/EnteroVirusCarraçasUropigeaCustom/Enterovirus/ABRIL_2026/ARTIGO_NATURE_SP/BuiltDB/DB_DL71_France_ChildPorto",
 
     # Force format: "fasta", "fastq", or None (auto-detect)
     "format": None,
