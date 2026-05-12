@@ -3,17 +3,33 @@
 import gzip
 
 # =========================================================
-# 🛠️ USER SETTINGS MUDANÇLA
+# 🛠️ USER SETTINGS
 # =========================================================
 
-KAIJU_FILE = "kaiju.out"
-FASTQ_FILE = "reads.fastq"
-OUTPUT_FASTA = "output.fasta"
+KAIJU_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/Kaiju/Amostra2_HANTA/kaiju.names.out"
+FASTQ_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/KBFTRN_fastq/KBFTRN_2_sample_02.fastq.gz"
 
-TARGET_TAXID = "660955"   # change this to your target
+# Output file
+OUTPUT_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/Kaiju/TentativaExtração/ExtractedV_Various.fasta"
+
+# Add ONE or MULTIPLE taxIDs
+TARGET_TAXIDS = {
+    "660955",
+    "1679445",
+    "990280",
+    "1980442",
+    "3052473",
+    "3052473",
+    "3052499",
+    "3052480",
+}
+
+# Output mode:
+# "fasta" or "fastq"
+OUTPUT_FORMAT = "fasta"
 
 KAIJU_IS_GZIPPED = False
-FASTQ_IS_GZIPPED = False
+FASTQ_IS_GZIPPED = True
 
 # =========================================================
 
@@ -26,7 +42,7 @@ def open_file(path, gz=False):
 
 def extract_read_ids():
     """
-    Extract read IDs from Kaiju extended format:
+    Extract read IDs from Kaiju extended output format:
     C <readID> <taxID> ...
     """
     read_ids = set()
@@ -38,7 +54,7 @@ def extract_read_ids():
 
             cols = line.rstrip().split("\t")
 
-            # Skip non-classified lines if any
+            # Skip unclassified reads
             if cols[0] != "C":
                 continue
 
@@ -48,45 +64,61 @@ def extract_read_ids():
             read_id = cols[1]
             taxid = cols[2]
 
-            if taxid == TARGET_TAXID:
+            # Match any target taxID
+            if taxid in TARGET_TAXIDS:
                 read_ids.add(read_id)
 
     return read_ids
 
 
-def fastq_to_fasta(read_ids):
+def extract_reads(read_ids):
     """
-    Convert matching FASTQ reads to FASTA.
+    Extract matching reads from FASTQ.
+    Output can be FASTA or FASTQ.
     """
-    with open_file(FASTQ_FILE, FASTQ_IS_GZIPPED) as fq, open(OUTPUT_FASTA, "w") as out:
+
+    with open_file(FASTQ_FILE, FASTQ_IS_GZIPPED) as fq, open(OUTPUT_FILE, "w") as out:
 
         while True:
             header = fq.readline().strip()
+
             if not header:
                 break
 
             seq = fq.readline().strip()
-            fq.readline()  # +
-            fq.readline()  # quality
+            plus = fq.readline().strip()
+            qual = fq.readline().strip()
 
             read_id = header.split()[0][1:]  # remove '@'
 
             if read_id in read_ids:
-                out.write(f">{read_id}\n{seq}\n")
+
+                if OUTPUT_FORMAT.lower() == "fasta":
+                    out.write(f">{read_id}\n{seq}\n")
+
+                elif OUTPUT_FORMAT.lower() == "fastq":
+                    out.write(f"{header}\n{seq}\n{plus}\n{qual}\n")
+
+                else:
+                    raise ValueError(
+                        "OUTPUT_FORMAT must be 'fasta' or 'fastq'"
+                    )
 
 
 def main():
-    print("🔍 Parsing Kaiju extended output...")
+
+    print("🔍 Parsing Kaiju output...")
     read_ids = extract_read_ids()
 
-    print(f"✔ Found {len(read_ids)} reads for taxID {TARGET_TAXID}")
+    print(
+        f"✔ Found {len(read_ids)} reads for "
+        f"{len(TARGET_TAXIDS)} target taxIDs"
+    )
 
-    print("✂ Extracting FASTQ reads...")
-    fastq_to_fasta(read_ids)
+    print("✂ Extracting reads...")
+    extract_reads(read_ids)
 
-    print(f"✅ Done → {OUTPUT_FASTA}")
-    #Hello
-    
+    print(f"✅ Done → {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
