@@ -11,11 +11,11 @@ from collections import defaultdict
 # CONFIG
 # =============================================================================
 
-OUTPUT_FOLDER = "/home/viroicbas/Downloads/DIAMOND_PIPELINE"
+OUTPUT_FOLDER = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/Diamond_Mimiplot_Teste"
 
-REFERENCE_FASTA = "/home/viroicbas/Downloads/ProtReferenceNova/ncbi_dataset/data/GCF_002118665.1/protein.faa"
+REFERENCE_FASTA = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/Diamond_Mimiplot_Teste/Refs/Proteins_ClosestMatch.fasta"
 
-QUERY_FASTQ = "/home/viroicbas/Downloads/ExtractedV_Various.fastq"
+QUERY_FASTQ = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/KBFTRN_fastq/KBFTRN_2_sample_02.fastq.gz"
 
 DB_PREFIX = os.path.join(OUTPUT_FOLDER, "protein_db")
 
@@ -245,5 +245,5 @@ def main():
 # ENTRY
 # =============================================================================
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
