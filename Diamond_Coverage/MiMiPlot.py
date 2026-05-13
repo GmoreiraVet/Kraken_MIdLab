@@ -402,31 +402,46 @@ def plot(cov_dict, ref_lengths):
 # =============================================================================
 
 def main():
-
+ 
     setup_logging()
-
+ 
     logging.info(
         f"Quality filters — identity: ≥{MIN_IDENTITY}%  "
         f"e-value: ≤{MAX_EVALUE}  aln_len: ≥{MIN_ALN_LEN} aa"
     )
-
+ 
     ref_lengths = get_reference_lengths(REFERENCE_FASTA)
-
+ 
     dmnd = build_db_if_needed()
-
+ 
     tsv = run_diamond(dmnd)
-
+ 
     cov, votes = parse(tsv, ref_lengths)
-
+ 
     plot(cov, ref_lengths)
-
+ 
     build_consensus(votes, ref_lengths)
-
+ 
     logging.info("Pipeline complete")
-
+ 
+    print("""
+　　　　　   __
+　　　　 ／フ   フ
+　　　　|  .   .|
+　 　　／`ミ__xノ
+　 　 /　　 　 |
+　　 /　 ヽ　　ﾉ
+ 　 │　　 | | |
+／￣|　　 | | |
+| (￣ヽ_ヽ)_)__)
+＼二つ
+ 
+  Mimi did her best to assemble your genome.
+""")
+ 
 # =============================================================================
 # ENTRY
 # =============================================================================
-
+ 
 if __name__ == "__main__":
     main()
