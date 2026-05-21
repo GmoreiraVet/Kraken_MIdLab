@@ -16,17 +16,17 @@ from datetime import datetime
 # --- Input reads -------------------------------------------------------------
 SHORT_R1    = ""          # Illumina R1  (leave empty string if not used)
 SHORT_R2    = ""          # Illumina R2  (leave empty string if not used)
-LONG_READS  = "/home/viroicbas2023/Documents/Gmoreira/GuilhermeMoreira2026/Tacheng/May2026/ReadsTogether/tacheng_joined.fastq"
+LONG_READS  = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/KBFTRN_fastq/KBFTRN_2_sample_02.fastq.gz"
 
 # --- Output ------------------------------------------------------------------
-OUT_DIR = "/home/viroicbas2023/Documents/Gmoreira/GuilhermeMoreira2026/Tacheng/May2026/UniCyler"
+OUT_DIR = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/Unicycler/Amostra2/"
 
 # --- Assembly mode -----------------------------------------------------------
 # Options: "conservative" | "normal" | "bold"
 #   conservative  → cautious bridging, fewer errors, may leave gaps
 #   normal        → balanced (recommended default)
 #   bold          → aggressive bridging, more complete but riskier
-MODE = "normal"
+MODE = "bold"
 
 # --- Performance -------------------------------------------------------------
 THREADS = 30
@@ -42,11 +42,11 @@ MIN_LONG_READ_LENGTH = 200
 
 # --- Minimum component size --------------------------------------------------
 # Discard assembly graph components smaller than this (bp).
-MIN_COMPONENT_SIZE = 1000
+MIN_COMPONENT_SIZE = 500
 
 # --- Minimum dead end size ---------------------------------------------------
 # Remove dead-end sequences shorter than this (bp).
-MIN_DEAD_END_SIZE = 1000
+MIN_DEAD_END_SIZE = 500
 
 # --- Keep intermediate files -------------------------------------------------
 # 0 = remove all,  1 = keep some,  2 = keep everything (useful for debugging)
