@@ -6,22 +6,15 @@ import gzip
 # 🛠️ USER SETTINGS
 # =========================================================
 
-KAIJU_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/Kaiju/Amostra2_HANTA/kaiju.names.out"
-FASTQ_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/KBFTRN_fastq/KBFTRN_2_sample_02.fastq.gz"
+KAIJU_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/KaijuResults_BIGDB/kaiju_named/KBFTRN_12_sample_12.kaiju_names.tsv"
+FASTQ_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/KBFTRN_fastq/KBFTRN_12_sample_12.fastq.gz"
 
 # Output file
-OUTPUT_FILE = "/home/viroicbas2023/Documents/Gmoreira/AndreiaGuiMay8/Kaiju/TentativaExtração/ExtractedV_Various.fasta"
+OUTPUT_FILE = "/home/viroicbas2023/Downloads/Fotos/HPV_GUI.fasta"
 
 # Add ONE or MULTIPLE taxIDs
 TARGET_TAXIDS = {
-    "660955",
-    "1679445",
-    "990280",
-    "1980442",
-    "3052473",
-    "3052473",
-    "3052499",
-    "3052480",
+    "10566",
 }
 
 # Output mode:
