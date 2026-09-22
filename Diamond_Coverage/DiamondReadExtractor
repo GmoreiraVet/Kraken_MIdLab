@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""
+extract_species_reads.py
+
+1. Reads a DIAMOND tabular output file (outfmt 6, with species name appended
+   in square brackets at the end of the last column, e.g.
+   "...protein [Rocahepevirus ratti]").
+2. Filters hits belonging to one or more chosen species.
+3. Extracts the corresponding reads from the original FASTQ file into a
+   new FASTQ file (supports plain .fastq and gzipped .fastq.gz).
+
+No command-line arguments — edit the CONFIG block below and run:
+    python extract_species_reads.py
+"""
+
+import csv
+import re
+import gzip
+
+# ============================== CONFIG ==============================
+INPUT_TSV = "/home/viroicbas2023/Documents/Andreia/ROCAHEPEVIRUS/rocas_DIAMOND.tsv"                # DIAMOND output file
+
+SPECIES_NAMES = [                             # one or more species to extract
+    "Rocahepevirus ratti",
+    "Hepatitis E virus",
+    "Rocahepevirus sp.",
+]
+
+PARTIAL_MATCH = False   # True = substring match (e.g. "Rocahepevirus" matches any species in that genus)
+
+INPUT_FASTQ = "ReaDS/PL8XTX_7_S76_Liver.fastq"                   # original FASTQ (.fastq or .fastq.gz)
+OUTPUT_FASTQ = "rocahepevirus_DOIS.fastq"        # matching reads written here (plain text)
+
+OUTPUT_TSV = "rocahepevirus.tsv"               # filtered DIAMOND rows go here
+OUTPUT_READ_LIST = "matched_read_ids_roca.txt"     # unique read/query IDs
+# ======================================================================
+
+SPECIES_PATTERN = re.compile(r"\[([^\[\]]+)\]\s*$")  # captures text inside the last [ ... ]
+
+
+def extract_species(stitle: str) -> str:
+    """Pull the species/organism name out of the trailing [Genus species] tag."""
+    match = SPECIES_PATTERN.search(stitle)
+    return match.group(1).strip() if match else ""
+
+
+def get_matching_read_ids():
+    targets = [s.strip().lower() for s in SPECIES_NAMES]
+    matched_rows = []
+    read_ids = []
+
+    with open(INPUT_TSV, "r", newline="") as infile:
+        reader = csv.reader(infile, delimiter="\t")
+        for row in reader:
+            if not row:
+                continue
+            stitle = row[-1]
+            species = extract_species(stitle).lower()
+
+            if PARTIAL_MATCH:
+                is_match = any(t in species for t in targets)
+            else:
+                is_match = species in targets
+
+            if is_match:
+                matched_rows.append(row)
+                read_ids.append(row[0])  # qseqid = read/query ID, first column
+
+    with open(OUTPUT_TSV, "w", newline="") as outfile:
+        writer = csv.writer(outfile, delimiter="\t")
+        writer.writerows(matched_rows)
+
+    unique_ids = sorted(set(read_ids))
+    with open(OUTPUT_READ_LIST, "w") as idfile:
+        idfile.write("\n".join(unique_ids) + ("\n" if unique_ids else ""))
+
+    print(f"Species queried : {', '.join(SPECIES_NAMES)}")
+    print(f"Matching rows   : {len(matched_rows)}")
+    print(f"Unique reads    : {len(unique_ids)}")
+    print(f"Filtered TSV    -> {OUTPUT_TSV}")
+    print(f"Read ID list    -> {OUTPUT_READ_LIST}")
+
+    return set(unique_ids)
+
+
+def open_maybe_gzip(path, mode="rt"):
+    if path.endswith(".gz"):
+        return gzip.open(path, mode)
+    return open(path, mode)
+
+
+def extract_reads_from_fastq(read_ids):
+    if not read_ids:
+        print("No matching read IDs — skipping FASTQ extraction.")
+        return
+
+    found = 0
+    with open_maybe_gzip(INPUT_FASTQ, "rt") as infastq, open(OUTPUT_FASTQ, "w") as outfastq:
+        while True:
+            header = infastq.readline()
+            if not header:
+                break
+            seq = infastq.readline()
+            plus = infastq.readline()
+            qual = infastq.readline()
+
+            if not (seq and plus and qual):
+                break  # malformed/truncated record at EOF
+
+            # FASTQ header looks like "@readid ..." or "@readid/1" etc.
+            # Match against DIAMOND qseqid by taking the token after '@'
+            # up to the first whitespace (and stripping common /1, /2 suffixes).
+            raw_id = header[1:].strip().split()[0]
+            read_id = re.sub(r"/[12]$", "", raw_id)
+
+            if raw_id in read_ids or read_id in read_ids:
+                outfastq.write(header)
+                outfastq.write(seq)
+                outfastq.write(plus)
+                outfastq.write(qual)
+                found += 1
+
+    print(f"Reads written to FASTQ : {found} / {len(read_ids)} expected")
+    print(f"Output FASTQ           -> {OUTPUT_FASTQ}")
+
+
+def main():
+    read_ids = get_matching_read_ids()
+    extract_reads_from_fastq(read_ids)
+
+
+if __name__ == "__main__":
+    main()
