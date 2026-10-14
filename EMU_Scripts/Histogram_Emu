@@ -1,0 +1,439 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Emu abundance plots and group comparisons.
+
+Reads a metadata table (one row per Emu *_rel-abundance.tsv) and produces:
+  1. Stacked bar per sample, faceted by GROUP_BY
+  2. Stacked bar of group mean abundance (GROUP_BY)
+  3. Taxon-level statistical comparison between COMPARE_BY groups (TSV + box/strip plots)
+  4. Bray-Curtis PCoA coloured by COMPARE_BY, with PERMANOVA
+
+Edit the CONFIG block and press Run (no arguments needed).
+Requires: pandas numpy matplotlib scipy natsort (+ openpyxl if metadata is .xlsx)
+"""
+
+from __future__ import annotations
+
+import re
+from math import ceil
+from pathlib import Path
+
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from natsort import natsorted
+from scipy.spatial.distance import pdist, squareform
+from scipy.stats import kruskal, mannwhitneyu
+
+# =============================== CONFIG ===============================
+METADATA_FILE = Path("/home/viroicbas2023/Documents/Gmoreira/AbelhasSoraia/Metadata/16S_Metadata.csv")   # .xlsx / .csv / .tsv
+OUTPUT_DIR = Path("/home/viroicbas2023/Documents/Gmoreira/AbelhasSoraia/Graficos")
+
+FILE_COL = "File_Name"       # metadata column with the Emu report path
+SAMPLE_COL = None            # metadata column to use as sample label (None = derive from file name)
+EMU_DIR = None               # fallback folder if the paths in FILE_COL don't exist on this machine
+LABEL_REMOVE = ["QV3LQH_", "_rel-abundance"]   # strings stripped from derived sample labels
+
+RANK = "species"               # species | genus | family | order | class | phylum
+GROUP_BY = "Sample_Type"     # metadata column(s) for facets + group-mean plot; str, list, or None
+COMPARE_BY = "Location"      # metadata column(s) defining the groups to compare; str or list
+COMPARE_PAIRS = None         # None = all COMPARE_BY groups at once (2 groups: Mann-Whitney,
+                             # >2: Kruskal-Wallis). Or pairwise, e.g. [("A", "B")]
+
+# Stacked-bar display
+THRESHOLD = 0.01             # taxa never reaching this fraction in any sample go to "Others"
+MAX_TAXA = 20                # cap on taxa shown (rest go to "Others"); None = no cap
+
+# Statistics
+MIN_ABUNDANCE_TEST = 0.001   # only test taxa reaching this fraction in at least one sample
+TOP_N_PLOT = 8               # taxa shown in the box/strip comparison figure
+PERMUTATIONS = 999           # PERMANOVA permutations
+PCOA_MARKER_BY = None        # optional metadata column for point shape (None = use GROUP_BY)
+
+FORMATS = ["png"]            # e.g. ["png", "svg", "pdf"]
+DPI = 300
+SHOW_PLOTS = False           # True opens figure windows (blocks until closed)
+# ======================================================================
+
+RANKS = ["species", "genus", "family", "order", "class", "phylum"]
+BASE_COLORS = [
+    "#954f4d", "#be6b50", "#efb571", "#d0a654", "#8f853c", "#5d523c",
+    "#403639", "#3d515b", "#719193", "#9db3ac", "#f7e4cd", "#a68d8c",
+    "#80696b", "#5c4850",
+]
+PSEUDOCOUNT = 1e-4
+rng = np.random.default_rng(1)
+
+
+# ----------------------------- helpers -------------------------------
+def read_metadata(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix in (".xlsx", ".xlsm", ".xls", ".ods"):
+        return pd.read_excel(path)
+    if suffix == ".csv":
+        return pd.read_csv(path)
+    return pd.read_csv(path, sep="\t")
+
+
+def resolve_path(p) -> Path | None:
+    p = Path(str(p)).expanduser()
+    if p.is_file():
+        return p
+    if EMU_DIR is not None:
+        q = Path(EMU_DIR).expanduser() / p.name
+        if q.is_file():
+            return q
+    return None
+
+
+def derive_label(p) -> str:
+    name = Path(str(p)).name
+    name = re.sub(r"\.tsv$", "", name)
+    for s in LABEL_REMOVE:
+        name = name.replace(s, "")
+    return name
+
+
+def load_emu(path: Path, rank: str) -> pd.Series:
+    df = pd.read_csv(path, sep="\t")
+    df = df[pd.to_numeric(df["tax_id"], errors="coerce").notna()].copy()  # drops unmapped etc.
+    if rank not in df.columns:
+        raise KeyError(f"{path.name}: no '{rank}' column (found {list(df.columns)})")
+    df[rank] = df[rank].fillna("Unassigned").replace("", "Unassigned")
+    return df.groupby(rank)["abundance"].sum()
+
+
+def make_group(meta: pd.DataFrame, by) -> pd.Series:
+    cols = [by] if isinstance(by, str) else list(by)
+    missing = [c for c in cols if c not in meta.columns]
+    if missing:
+        raise KeyError(f"Metadata column(s) {missing} not found. Available: {list(meta.columns)}")
+    return meta[cols].astype(str).agg("_".join, axis=1)
+
+
+def safe(s: str) -> str:
+    return re.sub(r"[^\w\-.]+", "_", s)
+
+
+def save(fig, name: str):
+    for ext in FORMATS:
+        fig.savefig(OUTPUT_DIR / f"{name}.{ext}", dpi=DPI, bbox_inches="tight")
+
+
+def collapse(rel: pd.DataFrame) -> pd.DataFrame:
+    keep = [t for t in rel.columns if rel[t].max() >= THRESHOLD]
+    order = rel[keep].mean().sort_values(ascending=False).index.tolist()
+    if MAX_TAXA:
+        order = order[:MAX_TAXA]
+    others = rel.drop(columns=order).sum(axis=1)
+    out = rel[order].copy()
+    if "Unassigned" in out.columns:  # keep Unassigned next to Others at the end
+        out = out[[c for c in out.columns if c != "Unassigned"] + ["Unassigned"]]
+    if (others > 0).any():
+        out["Others"] = others
+    return out
+
+
+def colour_map(taxa) -> dict:
+    extra = [mcolors.to_hex(c) for c in list(plt.cm.tab20.colors) + list(plt.cm.Set3.colors)]
+    palette = BASE_COLORS + extra
+    cmap = {}
+    i = 0
+    for t in taxa:
+        if t == "Others":
+            cmap[t] = "#808080"
+        elif t == "Unassigned":
+            cmap[t] = "#c8c8c8"
+        else:
+            cmap[t] = palette[i % len(palette)]
+            i += 1
+    return cmap
+
+
+def italic_legend(leg):
+    if RANK in ("species", "genus"):
+        for t in leg.get_texts():
+            if t.get_text() not in ("Others", "Unassigned"):
+                t.set_fontstyle("italic")
+
+
+def draw_stacked(ax, df: pd.DataFrame, cmap: dict):
+    x = np.arange(len(df))
+    bottom = np.zeros(len(df))
+    for col in df.columns:
+        vals = df[col].values
+        ax.bar(x, vals, bottom=bottom, color=cmap[col], width=0.8, edgecolor="none", label=col)
+        bottom += vals
+    ax.set_xticks(x)
+    ax.set_xticklabels(df.index, rotation=45, ha="right")
+    ax.set_xlim(-0.6, len(df) - 0.4)
+    ax.set_ylim(0, 1.0)
+
+
+def add_legend(fig, ax):
+    handles, labels = ax.get_legend_handles_labels()
+    leg = fig.legend(handles[::-1], labels[::-1], title=RANK.capitalize(),
+                     loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False)
+    italic_legend(leg)
+
+
+# ----------------------------- plots ---------------------------------
+def plot_per_sample(rel_c, groups, cmap):
+    if groups is None:
+        panels = [("All samples", list(natsorted(rel_c.index)))]
+    else:
+        panels = [(g, natsorted(groups[groups == g].index.tolist())) for g in natsorted(groups.unique())]
+    ratios = [len(s) for _, s in panels]
+    fig, axes = plt.subplots(1, len(panels), figsize=(max(6, 0.6 * sum(ratios) + 2.5 * len(panels)), 6.5),
+                             sharey=True, gridspec_kw={"width_ratios": ratios, "wspace": 0.05}, squeeze=False)
+    for ax, (g, samples) in zip(axes[0], panels):
+        draw_stacked(ax, rel_c.loc[samples], cmap)
+        ax.set_title(g, fontsize=13)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+    axes[0][0].set_ylabel("Relative abundance", fontsize=13)
+    add_legend(fig, axes[0][-1])
+    fig.suptitle(f"{RANK.capitalize()} relative abundance per sample", fontsize=15, y=1.0)
+    save(fig, f"{RANK}_per_sample")
+    return fig
+
+
+def plot_group_mean(rel_c, groups, cmap):
+    means = rel_c.groupby(groups).mean()
+    means = means.loc[natsorted(means.index)]
+    n = groups.value_counts()
+    means.index = [f"{g}\n(n={n[g]})" for g in means.index]
+    fig, ax = plt.subplots(figsize=(max(4, 1.1 * len(means) + 2), 6))
+    draw_stacked(ax, means, cmap)
+    ax.set_xticklabels(means.index, rotation=0, ha="center")
+    ax.set_ylabel("Mean relative abundance", fontsize=13)
+    ax.set_title(f"{RANK.capitalize()} mean abundance by group", fontsize=14)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    add_legend(fig, ax)
+    save(fig, f"{RANK}_group_mean")
+    return fig
+
+
+def plot_taxa_by_group(rel, groups, taxa, gnames, stats, label):
+    n = len(taxa)
+    ncol = min(4, n)
+    nrow = ceil(n / ncol)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(3.2 * ncol, 3.2 * nrow), squeeze=False)
+    for ax, t in zip(axes.ravel(), taxa):
+        data = [rel.loc[groups[groups == g].index, t].values for g in gnames]
+        ax.boxplot(data, positions=range(len(gnames)), widths=0.5, showfliers=False)
+        for i, d in enumerate(data):
+            ax.scatter(i + rng.uniform(-0.12, 0.12, len(d)), d, s=22, color="#954f4d", zorder=3)
+        ax.set_xticks(range(len(gnames)))
+        ax.set_xticklabels(gnames, rotation=30, ha="right")
+        row = stats.loc[t]
+        title = t if len(t) < 26 else t[:24] + "…"
+        ax.set_title(f"{title}\np={row['p_value']:.3g}, q={row['q_value']:.3g}", fontsize=9,
+                     fontstyle="italic" if RANK in ("species", "genus") else "normal")
+        ax.set_ylabel("Rel. abundance", fontsize=9)
+    for ax in axes.ravel()[n:]:
+        ax.set_visible(False)
+    fig.suptitle(f"Top {RANK} differences: {label}", fontsize=13)
+    fig.tight_layout()
+    save(fig, f"{RANK}_compare_{safe(label)}")
+    return fig
+
+
+# ----------------------------- statistics ----------------------------
+def bh(p):
+    p = np.asarray(p, float)
+    q = np.full_like(p, np.nan)
+    ok = ~np.isnan(p)
+    pv = p[ok]
+    if pv.size == 0:
+        return q
+    order = np.argsort(pv)
+    ranked = pv[order] * pv.size / np.arange(1, pv.size + 1)
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    out = np.empty(pv.size)
+    out[order] = np.minimum(ranked, 1)
+    q[ok] = out
+    return q
+
+
+def build_comparisons(groups):
+    names = natsorted(groups.unique())
+    if COMPARE_PAIRS:
+        for pair in COMPARE_PAIRS:
+            bad = [g for g in pair if g not in names]
+            if bad:
+                raise ValueError(f"COMPARE_PAIRS group(s) {bad} not found. Groups: {names}")
+        return [(f"{a}_vs_{b}", [a, b]) for a, b in COMPARE_PAIRS]
+    return [(" vs ".join(names), names)]
+
+
+def run_tests(rel, groups, gnames):
+    taxa = [t for t in rel.columns if t != "Unassigned" and rel[t].max() >= MIN_ABUNDANCE_TEST]
+    members = {g: groups[groups == g].index for g in gnames}
+    rows = []
+    for t in taxa:
+        vals = [rel.loc[members[g], t].values for g in gnames]
+        row = {"taxon": t}
+        for g, v in zip(gnames, vals):
+            row[f"mean_{g}"] = v.mean()
+        if len(gnames) == 2:
+            row["log2FC"] = np.log2((row[f"mean_{gnames[1]}"] + PSEUDOCOUNT) /
+                                    (row[f"mean_{gnames[0]}"] + PSEUDOCOUNT))
+        try:
+            if any(len(v) < 2 for v in vals):
+                raise ValueError
+            stat, p = (mannwhitneyu(*vals, alternative="two-sided") if len(gnames) == 2 else kruskal(*vals))
+        except ValueError:
+            stat, p = np.nan, np.nan
+        row["statistic"], row["p_value"] = stat, p
+        rows.append(row)
+    df = pd.DataFrame(rows).set_index("taxon")
+    df["q_value"] = bh(df["p_value"].values)
+    df["overall_mean"] = rel[df.index].mean()
+    return df.sort_values(["p_value", "overall_mean"], ascending=[True, False])
+
+
+def pcoa_bray(rel):
+    D = squareform(pdist(rel.values, metric="braycurtis"))
+    n = len(D)
+    J = np.eye(n) - np.ones((n, n)) / n
+    w, v = np.linalg.eigh(-0.5 * J @ (D ** 2) @ J)
+    idx = np.argsort(w)[::-1]
+    w, v = w[idx], v[:, idx]
+    coords = v[:, :2] * np.sqrt(np.clip(w[:2], 0, None))
+    var = w[:2] / w[w > 1e-12].sum()
+    return D, coords, var
+
+
+def permanova(D, labels, n_perm):
+    labels = np.asarray(labels)
+    n, groups = len(labels), np.unique(labels)
+    a = len(groups)
+    if a < 2 or n <= a:
+        return np.nan, np.nan
+    iu = np.triu_indices(n, 1)
+    ss_t = (D ** 2)[iu].sum() / n
+
+    def pseudo_f(lab):
+        ss_w = 0.0
+        for g in groups:
+            idx = np.where(lab == g)[0]
+            if len(idx) > 1:
+                sub = D[np.ix_(idx, idx)]
+                ss_w += (sub ** 2)[np.triu_indices(len(idx), 1)].sum() / len(idx)
+        return ((ss_t - ss_w) / (a - 1)) / (ss_w / (n - a)) if ss_w > 0 else np.inf
+
+    f_obs = pseudo_f(labels)
+    hits = sum(pseudo_f(rng.permutation(labels)) >= f_obs for _ in range(n_perm))
+    return f_obs, (hits + 1) / (n_perm + 1)
+
+
+def plot_pcoa(rel, cgroups, mgroups):
+    if len(rel) < 3:
+        print("PCoA skipped (need at least 3 samples)")
+        return None
+    D, xy, var = pcoa_bray(rel)
+    f, p = permanova(D, cgroups.loc[rel.index].values, PERMUTATIONS)
+    names = natsorted(cgroups.unique())
+    colours = {g: plt.cm.tab10(i % 10) for i, g in enumerate(names)}
+    markers = {}
+    if mgroups is not None:
+        for i, g in enumerate(natsorted(mgroups.unique())):
+            markers[g] = "osv^DP*X"[i % 8]
+    fig, ax = plt.subplots(figsize=(7.5, 6))
+    for i, s in enumerate(rel.index):
+        m = markers.get(mgroups.loc[s], "o") if mgroups is not None else "o"
+        ax.scatter(*xy[i], color=colours[cgroups.loc[s]], marker=m, s=90, edgecolor="k", linewidth=0.6, zorder=3)
+        ax.annotate(s, xy[i], xytext=(5, 4), textcoords="offset points", fontsize=8)
+    for g in names:
+        ax.scatter([], [], color=colours[g], label=g, s=70, edgecolor="k", linewidth=0.6)
+    leg1 = ax.legend(title="/".join([COMPARE_BY] if isinstance(COMPARE_BY, str) else COMPARE_BY),
+                     loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False)
+    ax.add_artist(leg1)
+    if markers:
+        handles = [plt.Line2D([], [], marker=m, color="w", markerfacecolor="grey", markeredgecolor="k", markersize=9,
+                              label=g) for g, m in markers.items()]
+        ax.legend(handles=handles, title="/".join([GROUP_BY] if isinstance(GROUP_BY, str) else GROUP_BY),
+                  loc="lower left", bbox_to_anchor=(1.01, 0), frameon=False)
+    ax.set_xlabel(f"PCo1 ({var[0] * 100:.1f}%)")
+    ax.set_ylabel(f"PCo2 ({var[1] * 100:.1f}%)")
+    ax.set_title(f"Bray-Curtis PCoA ({RANK})\nPERMANOVA pseudo-F={f:.2f}, p={p:.3f} ({PERMUTATIONS} perms)")
+    ax.axhline(0, color="#dddddd", lw=0.8, zorder=0)
+    ax.axvline(0, color="#dddddd", lw=0.8, zorder=0)
+    save(fig, f"{RANK}_pcoa_bray")
+    return fig
+
+
+# ------------------------------- main --------------------------------
+def main():
+    if RANK not in RANKS:
+        raise ValueError(f"RANK must be one of {RANKS}")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    meta = read_metadata(METADATA_FILE)
+    if FILE_COL not in meta.columns:
+        raise KeyError(f"'{FILE_COL}' not in metadata. Available: {list(meta.columns)}")
+
+    series, keep_rows = {}, []
+    for i, row in meta.iterrows():
+        path = resolve_path(row[FILE_COL])
+        label = str(row[SAMPLE_COL]) if SAMPLE_COL else derive_label(row[FILE_COL])
+        if path is None:
+            print(f"WARN: file not found, skipping {label}: {row[FILE_COL]}")
+            continue
+        series[label] = load_emu(path, RANK)
+        keep_rows.append(i)
+        meta.loc[i, "_label"] = label
+    if not series:
+        raise SystemExit("No Emu files could be loaded. Check FILE_COL / EMU_DIR.")
+
+    meta = meta.loc[keep_rows].set_index("_label")
+    rel = pd.concat(series, axis=1).fillna(0).T          # samples x taxa
+    rel = rel.loc[:, rel.sum() > 0]
+    empty = rel.index[rel.sum(axis=1) == 0]
+    if len(empty):
+        print(f"WARN: no classified reads, dropping: {list(empty)}")
+        rel = rel.drop(index=empty)
+        meta = meta.drop(index=empty)
+    rel.loc[natsorted(rel.index)].to_csv(OUTPUT_DIR / f"{RANK}_abundance_matrix.tsv", sep="\t")
+    print(f"Loaded {len(rel)} samples, {rel.shape[1]} {RANK} taxa")
+
+    rel_c = collapse(rel)
+    cmap = colour_map(rel_c.columns)
+    gmeta = make_group(meta, GROUP_BY) if GROUP_BY else None
+
+    figs = [plot_per_sample(rel_c, gmeta, cmap)]
+    if gmeta is not None:
+        figs.append(plot_group_mean(rel_c, gmeta, cmap))
+
+    # ---- group comparison ----
+    cgroups = make_group(meta, COMPARE_BY)
+    print("Comparison groups:", cgroups.value_counts().to_dict())
+    for label, gnames in build_comparisons(cgroups):
+        small = [g for g in gnames if (cgroups == g).sum() < 2]
+        if small:
+            print(f"WARN: {label}: group(s) {small} have <2 samples, no p-values computed")
+        stats = run_tests(rel, cgroups, gnames)
+        stats.to_csv(OUTPUT_DIR / f"{RANK}_stats_{safe(label)}.tsv", sep="\t")
+        top = stats.index[:TOP_N_PLOT].tolist()
+        if top:
+            figs.append(plot_taxa_by_group(rel, cgroups, top, gnames, stats, label))
+        sig = (stats["q_value"] < 0.05).sum()
+        print(f"{label}: {len(stats)} taxa tested, {sig} with q<0.05")
+
+    # ---- ordination ----
+    mby = PCOA_MARKER_BY or GROUP_BY
+    figs.append(plot_pcoa(rel.loc[natsorted(rel.index)], cgroups, make_group(meta, mby) if mby else None))
+
+    print(f"Outputs written to {OUTPUT_DIR}")
+    if SHOW_PLOTS:
+        plt.show()
+    else:
+        plt.close("all")
+
+
+if __name__ == "__main__":
+    main()
