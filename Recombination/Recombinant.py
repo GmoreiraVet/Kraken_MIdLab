@@ -53,7 +53,7 @@ INTERVALS = [
 # --- IQ-TREE ---------------------------------------------------------------
 RUN_IQTREE = True                  # False = only write FASTA/PHYLIP files
 IQTREE_EXECUTABLE = "iqtree3"      # name in PATH, or full path
-IQTREE_ARGS = ["--alrt", "10000", "-B", "10000"]
+IQTREE_ARGS = ["--alrt", "1000", "-B", "1000"]
 IQTREE_THREADS = "AUTO"            # "AUTO" or an integer (as string), passed to -T
 IQTREE_EXTRA_ARGS = []             # e.g. ["-m", "GTR+G", "-o", "OutgroupName"]
 TREE_INPUT_FORMAT = "fasta"       # "phylip" (writes .phy, as in your example) or "fasta"
